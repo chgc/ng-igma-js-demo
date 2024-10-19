@@ -1,21 +1,22 @@
 import { Component, inject, signal } from '@angular/core';
+
+import { HttpClient } from '@angular/common/http';
 import Graph, { DirectedGraph } from 'graphology';
+import forceAtlas2 from 'graphology-layout-forceatlas2';
+// import circlepack from 'graphology-layout/circlepack';
+import random from 'graphology-layout/random';
 import {
   catchError,
-  EMPTY,
   expand,
   filter,
   forkJoin,
   map,
   of,
   pipe,
-  sequenceEqual,
   toArray,
 } from 'rxjs';
 import { NodeInfo, Tree } from './interface';
 import { SigmaComponent } from './sigma/sigma.component';
-import { HttpClient } from '@angular/common/http';
-import forceAtlas2 from 'graphology-layout-forceatlas2';
 
 @Component({
   selector: 'app-root',
@@ -42,45 +43,38 @@ export class AppComponent {
   debugCheckPermission(object: string, relation: string, user: string) {
     this.target = object;
     const flattern = pipe(map((x: any[]) => x.flatMap((m) => m)));
+    const parentSelf = (child: string) => {
+      const [parent, relation] = child.split('#');
+      return {
+        parent,
+        child,
+        relation,
+        continue: false,
+        level,
+        seq: 0,
+      };
+    };
     const mapToUserSets = (level: number) =>
       pipe(
         filter((value: any) => value != null),
         map((value: { tree: Tree }) => {
           const parent = value.tree.root.name;
-          const parentSelf = {
-            parent: parent.split('#')[0],
-            child: parent,
-            relation: parent.split('#')[1],
-            continue: false,
-            level,
-            seq: 0,
-          };
           let users = value.tree.root.leaf?.users?.users ?? [];
-          const sets = value.tree.root.union?.nodes
-            .flatMap((node) => {
-              if (node.leaf?.users) {
-                users = users.concat(node.leaf.users.users);
-                return [];
-              }
-              return node.leaf?.tupleToUserset
-                ? node.leaf?.tupleToUserset?.computed ?? []
-                : [node.leaf?.computed];
-            })
-            .filter((x) => !!x);
+          const sets: string[] =
+            value.tree.root.union?.nodes
+              .flatMap((node) => [
+                ...(node.leaf?.users?.users ?? []),
+                ...(node.leaf?.tupleToUserset?.computed.map((x) => x.userset) ??
+                  []),
+                node.leaf?.computed?.userset,
+              ])
+              .filter((x) => x !== undefined) ?? [];
 
           const rawData = [
-            parentSelf,
-            ...(sets?.map((x) => ({
+            parentSelf(parent),
+            ...sets.concat(users).map((child) => ({
               parent,
-              child: x.userset,
-              continue: true,
-              relation: '',
-              level,
-              seq: 0,
-            })) ?? []),
-            ...users.map((user) => ({
-              parent,
-              child: user,
+              child,
               continue: true,
               relation,
               level,
@@ -107,13 +101,10 @@ export class AppComponent {
             values
               .filter((m) => m.continue)
               .map(({ child, relation }) => {
-                let [object, r] = child.split('#') ?? [];
-                if (!r) {
-                  r = relation;
-                }
-                return this.expand({ tuple_key: { object, relation: r } }).pipe(
-                  mapToUserSets(level)
-                );
+                const [object, _relation = relation] = child.split('#') ?? [];
+                return this.expand({
+                  tuple_key: { object, relation: _relation },
+                }).pipe(mapToUserSets(level));
               })
           ).pipe(flattern);
         }),
@@ -142,7 +133,7 @@ export class AppComponent {
         level: 0,
         seq: 0,
       },
-      ...nodes.map((x, idx) => ({
+      ...nodes.map((x) => ({
         object: x.parent,
         user: x.child,
         level: x.level,
@@ -169,57 +160,54 @@ export class AppComponent {
 
     // find graph path
     let path = data.reverse().reduce(
-      (acc, value) => {
-        if (value.user == acc.current)
-          return {
-            current: value.object ?? value.user,
-            path: [...acc.path, value],
-          };
-
-        return acc;
-      },
+      (acc, value) =>
+        value.user == acc.current
+          ? {
+              current: value.object ?? value.user,
+              path: [...acc.path, value],
+            }
+          : acc,
       {
         current: user,
         path: [] as NodeInfo[],
       }
     ).path;
     let color = 'green';
-    let userStep = 0;
     if (path.length === 1) {
       // if there is no correct path found.
       path = data;
       color = '';
-      userStep = 1;
     } else {
       path = path.toReversed().map((x, idx) => ({ ...x, level: idx, seq: 0 }));
     }
     // add nodes and edge
     path.forEach((item) => {
-      if (!graph.hasNode(item.user) && !!item.user) {
-        const level = (item.level ?? 0) + userStep;
+      if (!!item.user && !graph.hasNode(item.user)) {
         graph.addNode(item.user, setAttribute(item.user, color));
       }
 
-      if (!graph.hasNode(item.object) && !!item.object) {
-        const level = item.level ?? 0;
+      if (!!item.object && !graph.hasNode(item.object)) {
         graph.addNode(item.object, setAttribute(item.object, color));
       }
+
       if (
-        !graph.hasEdge(item.user, item.object) &&
         !!item.user &&
-        !!item.object
+        !!item.object &&
+        !graph.hasEdge(item.user, item.object)
       ) {
         graph.addEdge(item.user, item.object, createEdge(item.relation, color));
       }
     });
-    let i = 0;
-    graph.nodes().forEach((node) => {
-      graph.setNodeAttribute(node, 'x', i++);
-      graph.setNodeAttribute(node, 'y', i);
-    });
+
+    random.assign(graph);
+    // circlepack.assign(graph);
+
+    // const sensibleSettings = forceAtlas2.inferSettings(graph);
+    const sensibleSettings = forceAtlas2.inferSettings(500);
 
     forceAtlas2.assign(graph, {
-      iterations: 1000,
+      iterations: 50,
+      settings: sensibleSettings,
     });
     this.graph.set(graph);
   }
