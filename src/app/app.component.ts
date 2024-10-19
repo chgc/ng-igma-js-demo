@@ -38,8 +38,9 @@ export class AppComponent {
       )
       .pipe(catchError(() => of(null)));
   }
-
+  target: string = '';
   debugCheckPermission(object: string, relation: string, user: string) {
+    this.target = object;
     const flattern = pipe(map((x: any[]) => x.flatMap((m) => m)));
     const mapToUserSets = (level: number) =>
       pipe(

@@ -10,6 +10,8 @@ import {
   viewChild,
 } from '@angular/core';
 import Graph from 'graphology';
+import { bidirectional } from 'graphology-shortest-path/unweighted';
+import { edgePathFromNodePath } from 'graphology-shortest-path/utils';
 import { Sigma } from 'sigma';
 import { EdgeDisplayData, NodeDisplayData } from 'sigma/types';
 
@@ -22,16 +24,13 @@ import { EdgeDisplayData, NodeDisplayData } from 'sigma/types';
 })
 export class SigmaComponent {
   graph = input.required<Graph | undefined>();
+  object = input.required<string>();
   container = viewChild('container', { read: ElementRef });
   renderer = signal<Sigma | undefined>(undefined);
-  hoverNode = signal<string | undefined>(undefined);
   displayNode = signal<string[]>([]);
   displayEdge = signal<string[]>([]);
+  isHover = false;
 
-  neighbors = computed(() => {
-    const hoverNode = this.hoverNode();
-    return hoverNode ? this.graph()?.outNeighbors(hoverNode) ?? [] : [];
-  });
   rendererRef = effect(() => {
     const graph = this.graph();
     const renderer = this.renderer();
@@ -62,75 +61,41 @@ export class SigmaComponent {
         }
       );
       sigmaInstance.on('enterNode', ({ node }) => {
-        this.hoverNode.set(node);
-        this.test1();
+        this.isHover = true;
+        this.findPath(node);
       });
       sigmaInstance.on('leaveNode', () => {
-        this.hoverNode.set(undefined);
-        this.test1();
+        this.isHover = false;
+        this.findPath(undefined);
       });
 
       sigmaInstance.setSetting('nodeReducer', (node, data) => {
-        const res: Partial<NodeDisplayData> = { ...data };
-        if (
-          this.displayNode().length > 0 &&
-          this.displayNode().length !== this.graph()?.nodes().length
-        ) {
-          res.color = 'green';
-        } else {
-          res.color = '';
-        }
-        return res;
+        return { ...data, color: this.isHover ? 'green' : '' };
       });
 
       sigmaInstance.setSetting('edgeReducer', (edge, data) => {
-        const res: Partial<EdgeDisplayData> = { ...data };
-        if (
-          this.displayEdge().length > 0 &&
-          this.displayEdge().length !== this.graph()?.edges().length
-        ) {
-          res.color = 'green';
-        } else {
-          res.color = '';
-        }
-        return res;
+        return { ...data, color: this.isHover ? 'green' : '' };
       });
 
       this.renderer.set(sigmaInstance);
     });
   }
 
-  test1() {
-    if (this.hoverNode() === undefined) {
+  findPath(node: string | undefined) {
+    if (node === undefined) {
       const nodes = this.graph()?.nodes() ?? [];
       const edges = this.graph()?.edges() ?? [];
       this.displayNode.set(nodes);
       this.displayEdge.set(edges);
       return;
     }
-
-    let nodes = [this.hoverNode()!, ...this.neighbors()];
-    let n = this.neighbors();
-
-    do {
-      n = this.findOutNeighbors(n[0]);
-      nodes = nodes.concat(...n);
-    } while (n.length > 0);
+    const path = bidirectional(this.graph()!, node, this.object()) ?? [];
 
     const edges =
-      this.graph()?.filterEdges((e) => {
-        const [n1, n2] = this.graph()?.extremities(e) ?? [,];
-        const idx = nodes.findIndex((x) => x === n1);
-        return idx > -1 && nodes[idx + 1] === n2;
-      }) ?? [];
+      path.length === 0 ? [] : edgePathFromNodePath(this.graph()!, path);
 
-    this.displayNode.set(nodes);
+    this.displayNode.set(path);
     this.displayEdge.set(edges);
-  }
-
-  findOutNeighbors(node: string) {
-    if (node === undefined) return [];
-    return this.graph()?.outNeighbors(node) ?? [];
   }
 
   refreshGraph(nodes: string[], edges: string[]) {

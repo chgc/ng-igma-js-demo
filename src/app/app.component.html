@@ -1,5 +1,8 @@
 <button (click)="debugCheckPermission('page:b', 'can_access', 'user:ac')">
-  debugCheck
+  case 1
+</button>
+<button (click)="debugCheckPermission('page:b', 'parent', 'space:a')">
+  case 2
 </button>
 <hr />
-<app-sigma [graph]="graph()" />
+<app-sigma [graph]="graph()" [object]="target" />
